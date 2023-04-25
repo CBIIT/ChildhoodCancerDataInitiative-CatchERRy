@@ -49,12 +49,12 @@ print('\nThe CCDI submission template is being checked for errors.\n\n')
 ##############
 
 #Determine file ext and abs path
-file_name=os.path.splitext(file_path)[0]
+file_name=os.path.split(os.path.relpath(file_path))[1]
 file_ext=os.path.splitext(file_path)[1]
 file_dir_path=os.path.split(os.path.relpath(file_path))[0]
 
 if file_dir_path=='':
-    file_dir_path="./"
+    file_dir_path="."
 
 #obtain the date
 def refresh_date():
@@ -162,7 +162,7 @@ dict_nodes=set(list(meta_dfs.keys()))
 #
 ##############
 
-with open(f'{output_file}.txt', 'w') as outf:
+with open(f'{file_dir_path}/{output_file}.txt', 'w') as outf:
         
 
 ##############
@@ -416,6 +416,6 @@ for sheet_name, df in meta_dfs.items():
         ws.append(row)
 
 #save out template
-template_workbook.save(f'{file_dir_path}{output_file}.xlsx')
+template_workbook.save(f'{file_dir_path}/{output_file}.xlsx')
 
-print(f"\n\nProcess Complete.\n\nThe output file can be found here: {file_dir_path}{output_file}\n\n")
+print(f"\n\nProcess Complete.\n\nThe output file can be found here: {file_dir_path}/{output_file}\n\n")
