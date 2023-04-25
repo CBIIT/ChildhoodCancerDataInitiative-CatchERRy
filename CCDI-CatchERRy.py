@@ -49,7 +49,7 @@ print('\nThe CCDI submission template is being checked for errors.\n\n')
 ##############
 
 #Determine file ext and abs path
-file_name=os.path.split(os.path.relpath(file_path))[1]
+file_name=os.path.splitext(os.path.split(os.path.relpath(file_path))[1])[0]
 file_ext=os.path.splitext(file_path)[1]
 file_dir_path=os.path.split(os.path.relpath(file_path))[0]
 
