@@ -173,7 +173,11 @@ with open(f'{file_dir_path}/{output_file}.txt', 'w') as outf:
 
     print("The following columns have controlled vocabulary on the 'Terms and Value Sets' page of the template file. If the values present do not match, they will noted and in some cases the values will be replaced:\n----------", file=outf)
 
-    enum_arrays={'therapeutic_agents','treatment_type','study_data_types','morphology','primary_site','race'}
+     #For newer versions of the submission template, obtain the arrays from the Dictionary tab
+    if any(dict_df['Type'].str.contains('array')):
+        enum_arrays=dict_df[dict_df['Type'].str.contains('array')]["Property"].tolist()
+    else:
+        enum_arrays=['therapeutic_agents','treatment_type','study_data_types','morphology','primary_site','race']
 
     #for each tab
     for node in dict_nodes:
