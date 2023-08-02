@@ -20,6 +20,8 @@ import warnings
 import uuid
 import openpyxl
 from openpyxl.utils.dataframe import dataframe_to_rows
+import boto3
+from botocore.exceptions import ClientError
 
 
 parser = argparse.ArgumentParser(
@@ -29,6 +31,7 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument( '-f', '--filename', help='dataset file (.xlsx, .tsv, .csv)', required=True)
 parser.add_argument( '-t', '--template', help="dataset template file, CCDI_submission_metadata_template.xlsx", required=True)
+parser.add_argument( '-p', '--s3_profile', help="The s3 bucket profile associated with the access to the s3 bucket.",default='default')
 
 
 argcomplete.autocomplete(parser)
@@ -38,6 +41,7 @@ args = parser.parse_args()
 #pull in args as variables
 file_path=args.filename
 template_path=args.template
+profile=args.s3_profile
 
 print('\nThe CCDI submission template is being checked for errors.\n\n')
 
@@ -173,7 +177,7 @@ with open(f'{file_dir_path}/{output_file}.txt', 'w') as outf:
 
     print("The following columns have controlled vocabulary on the 'Terms and Value Sets' page of the template file. If the values present do not match, they will noted and in some cases the values will be replaced:\n----------", file=outf)
 
-     #For newer versions of the submission template, obtain the arrays from the Dictionary tab
+    #For newer versions of the submission template, obtain the arrays from the Dictionary tab
     if any(dict_df['Type'].str.contains('array')):
         enum_arrays=dict_df[dict_df['Type'].str.contains('array')]["Property"].tolist()
     else:
@@ -340,31 +344,88 @@ with open(f'{file_dir_path}/{output_file}.txt', 'w') as outf:
             df=meta_dfs[node]
             print (f"{node}\n----------", file=outf)
 
-            #Fix urls if the url does not contain the file name but only the base url
-            for row in range(0,len(df['file_url_in_cds'])):
-                bucket_url=df['file_url_in_cds'][row]
-                bucket_file=df['file_name'][row]
 
-                #skip if bucket_url is NA (no associated url for file)
-                if not pd.isna(bucket_url):
-                    #see if the file name is found in the bucket_url
-                    if bucket_file in bucket_url:
-                        if not bucket_file==os.path.split(bucket_url)[1]:
-                            print(f"\tERROR: There is an unresolvable issue with the file url for file: {bucket_file}", file=outf)
-                    #if the file name is not found in the bucket_url
-                    else:
-                        #if the url does not end with a "/"
-                        if not bucket_url[-1]=="/":
-                            bucket_url=bucket_url+"/"
+            #discover all possible base bucket urls in the file node
+            
+            node_all_urls=df['file_url_in_cds'].dropna()
+            node_urls= pd.DataFrame(node_all_urls)
 
-                        #fix the value by adding the file_name to the bucket
-                        bucket_url_fix=bucket_url+bucket_file
-                        if bucket_file==os.path.split(bucket_url_fix)[1]:
-                            df.loc[row,'file_url_in_cds']=bucket_url_fix
-                            print(f"\tWARNING: The file location for the file, {bucket_file}, has been changed:", file=outf)
-                            print(f"\t\t{bucket_url} ---> {bucket_url_fix}", file=outf)
+            node_urls['bucket'] = node_urls['file_url_in_cds'].apply(lambda x: x.split('/')[2])
+
+            node_urls = node_urls['bucket'].unique().tolist()
+
+            #create a blank list for bad url_locations
+            bad_url_locs=[]
+
+            #for each possible bucket based on the base urls in file_url_in_cds
+            #go through and see if the values for the url can be filled in based on file_name and size
+            if len(node_urls)>0:
+                for node_url in node_urls:
+                    
+                    #pull bucket metadata
+
+                    #Get s3 session setup
+                    session = boto3.Session(profile_name=profile)
+                    s3_client = session.client('s3')
+
+                    #initialize file metadata from bucket
+                    s3_file_path=[]
+                    s3_file_name=[]
+                    s3_file_size=[]
+                    
+                    #try and see if the bucket exists, if it does, obtain the metadata from it
+                    try:
+                        s3_client.head_bucket(Bucket=node_url)
+
+                        #create a paginator to itterate through each 1000 objs
+                        paginator = s3_client.get_paginator('list_objects_v2')
+                        response_iterator = paginator.paginate(Bucket=node_url)
+
+                        #pull out each response and obtain file name and size
+                        for response in response_iterator:
+                            if 'Contents' in response:
+                                for obj in response['Contents']:
+                                    s3_file_path.append('s3://'+node_url+'/'+obj['Key'])
+                                    s3_file_name.append(os.path.basename(obj['Key']))
+                                    s3_file_size.append(obj['Size'])
+
+                    except ClientError as e:
+                        if e.response['Error']['Code']=='404':
+                            print(f'\tThe following bucket either does not exist or you do not have read access for it: {node_url}', file=outf)
+
+                #create a metadata data frame from the bucket
+                df_bucket=pd.DataFrame({'file_path':s3_file_path, 'file_name':s3_file_name , 'file_size':s3_file_size})
+
+                #find bad url locs based on the full file path and whether it can be found in the url bucket manifest.
+                bad_url_locs = df['file_url_in_cds'].isin(df_bucket['file_path'])
+
+                #Go through each bad location and determine if the correct url location can be determined on file_name and file_size.
+                for loc in range(len(bad_url_locs)):
+                    #if the value is bad then fix
+                    if not bad_url_locs[loc]:
+                        file_name_find=df['file_name'][loc]
+                        file_size_find=df['file_size'][loc]
+
+                        #filter the bucket df to see if there is exactly one file value that matches both name and file size
+                        filtered_df=df_bucket[df_bucket['file_name']==file_name_find]
+                        filtered_df=filtered_df[filtered_df['file_size']==int(file_size_find)]
+
+                        if len(filtered_df)==1:
+                            #output of url change
+
+                            print(f"\tWARNING: The file location for the file, {file_name_find}, has been changed:", file=outf)
+                            print(f"\t\t{df['file_url_in_cds'][loc]} ---> {filtered_df['file_path'].values[0]}", file=outf)
+
+                            df['file_url_in_cds'][loc]=filtered_df['file_path'].values[0]
+                        
                         else:
-                            print(f"\tERROR: There is an unresolvable issue with the file url for file: {bucket_file}", file=outf)
+                            print(f"\tERROR: There is an unresolvable issue with the file url for file: {file_name_find}", file=outf)
+
+                #write back to the meta_dfs list
+                meta_dfs[node]=df
+
+            else:
+                print("ERROR: There is not a bucket associated with this node's files.", file=outf)
 
 
 ##############
@@ -374,7 +435,7 @@ with open(f'{file_dir_path}/{output_file}.txt', 'w') as outf:
 ##############
 
     print("The file based nodes will now have a guid assigned to each unique file.\n")
-     
+
     #check each node
     for node in dict_nodes:
         # if file_url_in_cds exists in the node
