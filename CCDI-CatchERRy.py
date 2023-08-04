@@ -335,7 +335,7 @@ with open(f'{file_dir_path}/{output_file}.txt', 'w') as outf:
 #
 ##############
 
-    print("\nCheck the following url columns (file_url_in_cds), to make sure the full file url is present and fix entries that are not:\n----------", file=outf)
+    print("\nCheck the following url columns (file_url_in_cds), to make sure the full file url is present and fix entries that are not:\n----------\n\nWARNING: If you are seeing a large number of 'ERROR: There is an unresolvable issue...', it is likely there are two or more buckets and this is the script trying and failing at checks against the other bucket for the file.", file=outf)
 
     #check each node
     for node in dict_nodes:
@@ -354,13 +354,12 @@ with open(f'{file_dir_path}/{output_file}.txt', 'w') as outf:
 
             node_urls = node_urls['bucket'].unique().tolist()
 
-            #create a blank list for bad url_locations
-            bad_url_locs=[]
-
             #for each possible bucket based on the base urls in file_url_in_cds
             #go through and see if the values for the url can be filled in based on file_name and size
             if len(node_urls)>0:
                 for node_url in node_urls:
+                    #create a blank list for bad url_locations
+                    bad_url_locs=[]
                     
                     #pull bucket metadata
 
