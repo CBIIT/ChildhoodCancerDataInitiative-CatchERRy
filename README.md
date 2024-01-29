@@ -1,4 +1,4 @@
-# ChildhoodCancerDataInitiative-CatchERRy
+# ChildhoodCancerDataInitiative-CatchERRy (ARCHIVED)
 This script will take a CCDI metadata manifest file and try to blindly fix the most common errors before the validation step. 
 
 This is a refactoring of the [CCDI-CatchERR](https://github.com/CBIIT/ChildhoodCancerDataInitiative-CatchERR) code into python.
